@@ -2,10 +2,11 @@ package model
 
 // ScanResult 扫描结果
 type ScanResult struct {
-	Target     string       `json:"target"`
-	HostStatus string       `json:"host_status"`
-	ScanTime   string       `json:"scan_time"`
-	Ports      []PortResult `json:"ports"`
+	Target         string       `json:"target"`
+	OriginalTarget string       `json:"original_target,omitempty"`
+	HostStatus     string       `json:"host_status"`
+	ScanTime       string       `json:"scan_time"`
+	Ports          []PortResult `json:"ports"`
 }
 
 // PortResult 端口扫描结果

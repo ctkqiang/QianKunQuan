@@ -1,0 +1,24 @@
+app:
+  name: "乾坤圈"
+  version: "1.0.0"
+  description: "Go语言端口扫描与CVE检测工具"
+
+database:
+  path: "database/cve_data.db"
+  update_frequency: 24h
+  sources:
+    - name: "NVD"
+      url: "https://nvd.nist.gov/vuln/data-feeds"
+      format: "json"
+    - name: "CVE Details"
+      url: "https://www.cvedetails.com/json-feed.php"
+      format: "json"
+
+scanner:
+  default_timeout: 2
+  default_threads: 100
+  banner_timeout: 5
+  
+logging:
+  level: "info"
+  output: "stdout"

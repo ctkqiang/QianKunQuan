@@ -19,14 +19,19 @@ type PortScanner struct {
 	results chan model.PortResult
 	wg      sync.WaitGroup
 	logger  *utils.Logger
+	ctx     context.Context
+	cancel  context.CancelFunc
 }
 
 func NewPortScanner(timeoutSec int, threads int) *PortScanner {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &PortScanner{
 		timeout: time.Duration(timeoutSec) * time.Second,
 		threads: threads,
 		results: make(chan model.PortResult, 1000),
 		logger:  utils.NewLogger("scanner"),
+		ctx:     ctx,
+		cancel:  cancel,
 	}
 }
 
@@ -201,8 +206,8 @@ func (ps *PortScanner) detectService(port int, banner string) string {
 
 // ConcurrentScan 并发扫描
 func (ps *PortScanner) ConcurrentScan(target string, ports []int) <-chan model.PortResult {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// 重置context
+	ps.ctx, ps.cancel = context.WithCancel(context.Background())
 
 	// 创建工作池
 	portChan := make(chan int, len(ports))
@@ -210,13 +215,17 @@ func (ps *PortScanner) ConcurrentScan(target string, ports []int) <-chan model.P
 	// 启动worker
 	for i := 0; i < ps.threads; i++ {
 		ps.wg.Add(1)
-		go ps.worker(ctx, target, portChan)
+		go ps.worker(ps.ctx, target, portChan)
 	}
 
 	// 发送端口到channel
 	go func() {
 		for _, port := range ports {
-			portChan <- port
+			select {
+			case portChan <- port:
+			case <-ps.ctx.Done():
+				break
+			}
 		}
 		close(portChan)
 		ps.wg.Wait()
@@ -240,4 +249,8 @@ func (ps *PortScanner) worker(ctx context.Context, target string, ports <-chan i
 			}
 		}
 	}
+}
+
+func (ps *PortScanner) Stop() {
+	ps.cancel()
 }
