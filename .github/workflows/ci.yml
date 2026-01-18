@@ -24,7 +24,7 @@ jobs:
           cache: true
 
       - name: 配置 Go 模块缓存
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/go/pkg/mod
