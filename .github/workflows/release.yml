@@ -3,7 +3,7 @@ name: Build and Release
 
 permissions:
   contents: write
-  
+
 on:
   push:
     tags:
@@ -64,6 +64,7 @@ jobs:
         cache: true
     
     - name: Print build information
+      shell: bash
       run: |
         echo "🏗️  Building ${{ env.PROJECT_NAME }} (${{ env.PROJECT_CODE }})"
         echo "📦 Version: ${{ env.VERSION }}"
@@ -72,15 +73,18 @@ jobs:
         echo "📁 Output directory: ${{ env.OUTPUT_DIR }}"
     
     - name: Install dependencies
+      shell: bash
       run: |
         go mod download
         go mod verify
     
     - name: Create output directory
+      shell: bash
       run: |
         mkdir -p ${{ env.OUTPUT_DIR }}
     
     - name: Build binary
+      shell: bash
       run: |
         # 设置输出文件名
         BINARY_NAME="${{ env.PROJECT_CODE }}-${{ env.VERSION }}-${{ matrix.target }}-${{ matrix.arch }}${{ matrix.binary_ext }}"
@@ -88,7 +92,13 @@ jobs:
         echo "🔨 Building: $BINARY_NAME"
         
         # 设置构建变量
-        GOOS=${{ matrix.target == 'darwin' && 'darwin' || matrix.target == 'windows' && 'windows' || 'linux' }}
+        if [[ "${{ matrix.target }}" == *"darwin"* ]]; then
+          GOOS="darwin"
+        elif [[ "${{ matrix.target }}" == *"windows"* ]]; then
+          GOOS="windows"
+        else
+          GOOS="linux"
+        fi
         GOARCH=${{ matrix.arch }}
         
         # 执行构建
@@ -127,11 +137,13 @@ jobs:
         path: artifacts
     
     - name: List downloaded files
+      shell: bash
       run: |
         echo "📂 Downloaded artifacts:"
         find artifacts -type f -name "*.exe" -o -name "*" | sort
     
     - name: Create release package
+      shell: bash
       run: |
         # 创建发行版目录
         mkdir -p release
@@ -238,6 +250,7 @@ jobs:
     
     steps:
     - name: Display info
+      shell: bash
       run: |
         echo "📦 Homebrew发布准备"
         echo "🔗 Release URL: https://github.com/${{ github.repository }}/releases/tag/${{ env.VERSION }}"
