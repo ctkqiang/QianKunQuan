@@ -16,6 +16,8 @@ import (
 	"QianKunQuan/pkg/cli"
 )
 
+var Version = "dev"
+
 func main() {
 	// 解析命令行参数
 	parser := cli.NewParser()
@@ -29,7 +31,7 @@ func main() {
 	options := parser.Options
 	logger := utils.NewLogger("main")
 
-	logger.Info("启动乾坤圈扫描器 v1.0")
+	logger.Info("启动乾坤圈扫描器 %s", Version)
 
 	// 处理目标地址
 	target := extractHostname(options.Target)
@@ -188,7 +190,7 @@ func main() {
 	}
 
 	// 输出结果
-	formatter := cli.NewOutputFormatter(options.OutputFormat)
+	formatter := cli.NewOutputFormatter(options.OutputFormat, Version)
 	if err := formatter.PrintResult(finalResult, options.OutputFile); err != nil {
 		logger.Error("输出结果失败: %v", err)
 		os.Exit(1)

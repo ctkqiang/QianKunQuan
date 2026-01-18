@@ -1,4 +1,4 @@
-name: 构建乾坤圈 
+name: 构建乾坤圈
 
 permissions:
   contents: write
@@ -8,40 +8,147 @@ on:
     tags:
       - 'v*'
 
+env:
+  # 提取版本标签（去掉v前缀）
+  VERSION: ${{ github.ref_name }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # 支持的平台架构矩阵
+        include:
+          - os: linux
+            arch: amd64
+            ext: ""
+          - os: linux
+            arch: 386
+            ext: ""
+          - os: linux
+            arch: arm64
+            ext: ""
+          - os: windows
+            arch: amd64
+            ext: .exe
+          - os: windows
+            arch: 386
+            ext: .exe
+          - os: darwin
+            arch: amd64
+            ext: ""
+          - os: darwin
+            arch: arm64
+            ext: ""
+          - os: freebsd
+            arch: amd64
+            ext: ""
+          - os: freebsd
+            arch: 386
+            ext: ""
+
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
-      
+        with:
+          fetch-depth: 0
+
       - name: 设置 Go
         uses: actions/setup-go@v4
         with:
-          go-version: '1.21'
-      
-      - name: 构建
+          go-version: '1.25'
+          cache: true
+
+      - name: 配置 Go 模块缓存
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: 下载依赖
+        run: go mod download
+
+      - name: 运行测试
+        run: go test ./...
+
+      - name: 构建二进制文件
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: 0
         run: |
+          # 创建输出目录
           mkdir -p dist
           
-          # Linux (x64, x86)
-          GOOS=linux GOARCH=amd64 go build -o dist/QianKunQuan-linux-amd64 .
-          GOOS=linux GOARCH=386 go build -o dist/QianKunQuan-linux-386 .
+          # 构建参数
+          BUILD_FLAGS="-trimpath -ldflags='-s -w -X main.Version=${{ env.VERSION }}'"
           
-          # Windows (x64, x86)
-          GOOS=windows GOARCH=amd64 go build -o dist/QianKunQuan-windows-amd64.exe .
-          GOOS=windows GOARCH=386 go build -o dist/QianKunQuan-windows-386.exe .
+          # 执行构建
+          echo "正在构建 $GOOS/$GOARCH 版本..."
+          go build $BUILD_FLAGS -o "dist/QianKunQuan-$GOOS-$GOARCH${{ matrix.ext }}" cmd/main.go
           
-          # FreeBSD (x64, x86)
-          GOOS=freebsd GOARCH=amd64 go build -o dist/QianKunQuan-freebsd-amd64 .
-          GOOS=freebsd GOARCH=386 go build -o dist/QianKunQuan-freebsd-386 .
-          
-          # macOS (x64, arm64)
-          GOOS=darwin GOARCH=amd64 go build -o dist/QianKunQuan-darwin-amd64 .
-          GOOS=darwin GOARCH=arm64 go build -o dist/QianKunQuan-darwin-arm64 .
-      
-      - name: 创建发布版
-        uses: ncipollo/release-action@v1
+          # 验证构建结果
+          if [ -f "dist/QianKunQuan-$GOOS-$GOARCH${{ matrix.ext }}" ]; then
+            echo "✅ $GOOS/$GOARCH 构建成功"
+            # 如果是可执行文件，显示基本信息
+            if [ "${{ matrix.ext }}" != ".exe" ] && [ "$GOOS" != "windows" ]; then
+              chmod +x "dist/QianKunQuan-$GOOS-$GOARCH${{ matrix.ext }}"
+              echo "文件大小: $(du -h "dist/QianKunQuan-$GOOS-$GOARCH${{ matrix.ext }}" | cut -f1)"
+            fi
+          else
+            echo "❌ $GOOS/$GOARCH 构建失败"
+            exit 1
+          fi
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v3
         with:
-          artifacts: "dist/*"
-          token: ${{ secrets.GITHUB_TOKEN }}
+          name: binaries
+          path: dist/
+          retention-days: 7
+
+  create-release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+      - name: 下载构建产物
+        uses: actions/download-artifact@v3
+        with:
+          name: binaries
+          path: dist/
+
+      - name: 创建发布说明
+        run: |
+          echo "## 乾坤圈 ${{ env.VERSION }}" > release-notes.md
+          echo "" >> release-notes.md
+          echo "### 新版本特性" >> release-notes.md
+          echo "- 基于 Go 1.25 构建" >> release-notes.md
+          echo "- 支持多平台架构" >> release-notes.md
+          echo "- 包含版本信息注入" >> release-notes.md
+          echo "" >> release-notes.md
+          echo "### 支持的平台" >> release-notes.md
+          echo "- Linux (x64, x86, arm64)" >> release-notes.md
+          echo "- Windows (x64, x86)" >> release-notes.md
+          echo "- macOS (x64, arm64)" >> release-notes.md
+          echo "- FreeBSD (x64, x86)" >> release-notes.md
+          echo "" >> release-notes.md
+          echo "### 文件校验和" >> release-notes.md
+          echo '```' >> release-notes.md
+          cd dist && sha256sum * >> ../release-notes.md
+          echo '```' >> release-notes.md
+
+      - name: 创建 GitHub 发布版
+        uses: softprops/action-gh-release@v1
+        with:
+          name: 乾坤圈 ${{ env.VERSION }}
+          body_path: release-notes.md
+          files: dist/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true

@@ -13,11 +13,12 @@ import (
 )
 
 type OutputFormatter struct {
-	format string
+	format  string
+	version string
 }
 
-func NewOutputFormatter(format string) *OutputFormatter {
-	return &OutputFormatter{format: format}
+func NewOutputFormatter(format, version string) *OutputFormatter {
+	return &OutputFormatter{format: format, version: version}
 }
 
 func (of *OutputFormatter) PrintResult(result model.ScanResult, outputFile string) error {
@@ -45,7 +46,7 @@ func (of *OutputFormatter) formatEnhancedNmapStyle(result model.ScanResult) stri
 	var builder strings.Builder
 
 	// 标题行
-	builder.WriteString(fmt.Sprintf("\n📡 乾坤圈端口扫描器 v1.0\n"))
+	builder.WriteString(fmt.Sprintf("\n📡 乾坤圈端口扫描器 %s\n", of.version))
 	builder.WriteString(strings.Repeat("═", 60) + "\n")
 
 	// 扫描信息
