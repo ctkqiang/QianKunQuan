@@ -48,7 +48,7 @@ func main() {
 	defer cveDB.Close()
 
 	// 创建端口扫描器
-	portScanner := scanner.NewPortScanner(options.Timeout, options.Threads)
+	portScanner := scanner.NewPortScanner(options.Timeout, options.Threads, options.Verbose)
 
 	// 解析端口范围
 	ports, err := portScanner.ParsePortRange(options.PortRange)
