@@ -217,7 +217,7 @@ func (ps *PortScanner) ScanPort(target string, port int, protocol string) model.
 		State:    "closed",
 	}
 
-	address := fmt.Sprintf("%s:%d", target, port)
+	address := net.JoinHostPort(target, strconv.Itoa(port))
 
 	if ps.verbose {
 		ps.logger.Debug("尝试连接: %s (端口 %d)", address, port)
@@ -326,12 +326,45 @@ func (ps *PortScanner) extractVersionFromBanner(banner, serviceName string) stri
 		return ""
 	}
 
-	// 查找版本号模式
+	// 首先尝试特定服务的关键模式
+	lowerBanner := strings.ToLower(banner)
+
+	// HTTP/HTTPS响应版本 (HTTP/1.1, HTTP/2.0)
+	if strings.Contains(lowerBanner, "http/") {
+		re := regexp.MustCompile(`(?i)HTTP/(\d+\.\d+)`)
+		if matches := re.FindStringSubmatch(banner); matches != nil {
+			return matches[1] // 返回版本号，不带"HTTP/"前缀
+		}
+	}
+
+	// SSH版本 (SSH-2.0)
+	if strings.Contains(lowerBanner, "ssh") {
+		re := regexp.MustCompile(`(?i)SSH-(\d+\.\d+)`)
+		if matches := re.FindStringSubmatch(banner); matches != nil {
+			return matches[1]
+		}
+	}
+
+	// FTP服务器版本
+	if strings.Contains(lowerBanner, "ftp") {
+		re := regexp.MustCompile(`(?i)(?:version|ver)\s*[:=]?\s*(\d+\.\d+(?:\.\d+)*)`)
+		if matches := re.FindStringSubmatch(banner); matches != nil {
+			return matches[1]
+		}
+	}
+
+	// 通用版本号模式
 	patterns := []string{
-		`\d+\.\d+(\.\d+)*`,          // 1.2.3 或 1.2
-		`v\d+\.\d+`,                 // v1.2
-		`version\s*[:]?\s*\d+\.\d+`, // version 1.2 或 version:1.2
-		`(?i)` + strings.ToLower(serviceName) + `[/\s]+\d+\.\d+`, // nginx/1.18
+		`\bv(\d+\.\d+(?:\.\d+[a-z]?)?)\b`,                                          // v1.2 或 v1.2.3 或 v1.2.3a
+		`\b\d+\.\d+(?:\.\d+[a-z]?)?\b`,                                             // 独立的版本号 1.2.3 或 1.2 或 1.2.3a
+		`(?i)version\s*[:=]?\s*(\d+\.\d+(?:\.\d+[a-z]?)?)`,                         // version: 1.2.3
+		`(?i)ver\.?\s*(\d+\.\d+(?:\.\d+[a-z]?)?)`,                                  // ver 1.2 或 ver.1.2
+		`(?i)` + strings.ToLower(serviceName) + `[/\s]+(\d+\.\d+(?:\.\d+[a-z]?)?)`, // nginx/1.18
+		`(?i)server.*?(\d+\.\d+(?:\.\d+[a-z]?)?)`,                                  // Server: nginx/1.18.0
+		`(?i)apache.*?(\d+\.\d+(?:\.\d+[a-z]?)?)`,                                  // Apache/x.x.x
+		`(?i)nginx.*?(\d+\.\d+(?:\.\d+[a-z]?)?)`,                                   // nginx/x.x.x
+		`(?i)openssh.*?(\d+\.\d+(?:\.\d+[a-z]?)?(?:p\d+)?)`,                        // OpenSSH_x.x 或 OpenSSH_x.xp1
+		`(?i)microsoft.*?(\d+\.\d+(?:\.\d+[a-z]?)?)`,                               // Microsoft-IIS/x.x
 	}
 
 	for _, pattern := range patterns {
@@ -339,9 +372,14 @@ func (ps *PortScanner) extractVersionFromBanner(banner, serviceName string) stri
 		if err != nil {
 			continue
 		}
-		matches := re.FindString(banner)
-		if matches != "" {
-			return matches
+		matches := re.FindStringSubmatch(banner)
+		if matches != nil {
+			// 如果模式有捕获组，返回第一个捕获组
+			if len(matches) > 1 {
+				return matches[1]
+			}
+			// 否则返回整个匹配
+			return matches[0]
 		}
 	}
 

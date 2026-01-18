@@ -197,7 +197,7 @@ func (cd *CVEDownloader) ParseAndStore(db *CVEDatabase) error {
 
 		// 检查文件是否存在
 		if _, err := os.Stat(zipPath); os.IsNotExist(err) {
-			fmt.Errorf("文件不存在: %s", zipPath)
+			cd.logger.Warn("文件不存在: %s", zipPath)
 			continue
 		}
 

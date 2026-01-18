@@ -37,3 +37,9 @@ func (l *Logger) Debug(format string, args ...interface{}) {
 		l.logger.Printf(prefix+format, args...)
 	}
 }
+
+// 添加Warn方法
+func (l *Logger) Warn(format string, args ...interface{}) {
+	prefix := fmt.Sprintf("[%s][WARN][%s] ", l.name, time.Now().Format("15:04:05"))
+	l.logger.Printf(prefix+format, args...)
+}
