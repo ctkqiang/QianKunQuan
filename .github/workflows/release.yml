@@ -1,154 +1,242 @@
-name: 构建乾坤圈
-
-permissions:
-  contents: write
+name: Build and Release
 
 on:
   push:
     tags:
-      - 'v*'
+      - 'v*.*.*'
+  workflow_dispatch:  # 允许手动触发
 
 env:
-  # 提取版本标签（去掉v前缀）
+  # 项目信息
+  PROJECT_NAME: "乾坤圈"  # 中文项目名
+  PROJECT_CODE: "QianKunQuan"  # 项目代码名
   VERSION: ${{ github.ref_name }}
+  
+  # Go 配置
+  GO_VERSION: '1.21'
+  GOARCH: 'amd64'
+  
+  # 输出目录
+  OUTPUT_DIR: dist
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  build-matrix:
+    name: Build for ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        # 支持的平台架构矩阵
         include:
-          - os: linux
+          - os: ubuntu-latest
             arch: amd64
-            ext: ""
-          - os: linux
-            arch: 386
-            ext: ""
-          - os: linux
+            binary_ext: ""
+            target: linux
+          - os: ubuntu-latest
             arch: arm64
-            ext: ""
-          - os: windows
+            binary_ext: ""
+            target: linux-arm64
+          - os: macos-latest
             arch: amd64
-            ext: .exe
-          - os: windows
-            arch: 386
-            ext: .exe
-          - os: darwin
-            arch: amd64
-            ext: ""
-          - os: darwin
+            binary_ext: ""
+            target: darwin
+          - os: macos-latest
             arch: arm64
-            ext: ""
-          - os: freebsd
+            binary_ext: ""
+            target: darwin-arm64
+          - os: windows-latest
             arch: amd64
-            ext: ""
-          - os: freebsd
-            arch: 386
-            ext: ""
-
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: 设置 Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: '1.25'
-          cache: true
-
-      - name: 配置 Go 模块缓存
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-
-      - name: 下载依赖
-        run: go mod download
-
-      - name: 运行测试
-        run: go test ./...
-
-      - name: 构建二进制文件
-        env:
-          GOOS: ${{ matrix.os }}
-          GOARCH: ${{ matrix.arch }}
-          CGO_ENABLED: 0
-        run: |
-          # 创建输出目录
-          mkdir -p dist
-          
-          # 构建参数
-          BUILD_FLAGS="-trimpath -ldflags='-s -w -X main.Version=${{ env.VERSION }}'"
-          
-          # 执行构建
-          echo "正在构建 $GOOS/$GOARCH 版本..."
-          go build $BUILD_FLAGS -o "dist/QianKunQuan-$GOOS-$GOARCH${{ matrix.ext }}" cmd/main.go
-          
-          # 验证构建结果
-          if [ -f "dist/QianKunQuan-$GOOS-$GOARCH${{ matrix.ext }}" ]; then
-            echo "✅ $GOOS/$GOARCH 构建成功"
-            # 如果是可执行文件，显示基本信息
-            if [ "${{ matrix.ext }}" != ".exe" ] && [ "$GOOS" != "windows" ]; then
-              chmod +x "dist/QianKunQuan-$GOOS-$GOARCH${{ matrix.ext }}"
-              echo "文件大小: $(du -h "dist/QianKunQuan-$GOOS-$GOARCH${{ matrix.ext }}" | cut -f1)"
-            fi
-          else
-            echo "❌ $GOOS/$GOARCH 构建失败"
-            exit 1
-          fi
-
-      - name: 上传构建产物
-        uses: actions/upload-artifact@v4
-        with:
-          name: binaries
-          path: dist/
-          retention-days: 7
-
-  create-release:
-    needs: build
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
+            binary_ext: ".exe"
+            target: windows
     
     steps:
-      - name: 下载构建产物
-        uses: actions/download-artifact@v4
-        with:
-          name: binaries
-          path: dist/
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Setup Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+    
+    - name: Print build information
+      run: |
+        echo "🏗️  Building ${{ env.PROJECT_NAME }} (${{ env.PROJECT_CODE }})"
+        echo "📦 Version: ${{ env.VERSION }}"
+        echo "💻 OS: ${{ matrix.target }}"
+        echo "⚙️  Architecture: ${{ matrix.arch }}"
+        echo "📁 Output directory: ${{ env.OUTPUT_DIR }}"
+    
+    - name: Install dependencies
+      run: |
+        go mod download
+        go mod verify
+    
+    - name: Create output directory
+      run: |
+        mkdir -p ${{ env.OUTPUT_DIR }}
+    
+    - name: Build binary
+      run: |
+        # 设置输出文件名
+        BINARY_NAME="${{ env.PROJECT_CODE }}-${{ env.VERSION }}-${{ matrix.target }}-${{ matrix.arch }}${{ matrix.binary_ext }}"
+        
+        echo "🔨 Building: $BINARY_NAME"
+        
+        # 设置构建变量
+        GOOS=${{ matrix.target == 'darwin' && 'darwin' || matrix.target == 'windows' && 'windows' || 'linux' }}
+        GOARCH=${{ matrix.arch }}
+        
+        # 执行构建
+        CGO_ENABLED=0 go build \
+          -trimpath \
+          -ldflags="\
+            -X 'main.Version=${{ env.VERSION }}' \
+            -X 'main.BuildTime=$(date -u "+%Y-%m-%d %H:%M:%S")' \
+            -X 'main.CommitHash=$(git rev-parse --short HEAD)' \
+            -s -w" \
+          -o "${{ env.OUTPUT_DIR }}/$BINARY_NAME" \
+          ./cmd
+        
+        echo "✅ Build completed: $BINARY_NAME"
+        
+        # 显示文件信息
+        ls -lh "${{ env.OUTPUT_DIR }}/$BINARY_NAME"
+    
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.target }}-${{ matrix.arch }}
+        path: ${{ env.OUTPUT_DIR }}/
+        retention-days: 7
 
-      - name: 创建发布说明
-        run: |
-          echo "## 乾坤圈 ${{ env.VERSION }}" > release-notes.md
-          echo "" >> release-notes.md
-          echo "### 新版本特性" >> release-notes.md
-          echo "- 基于 Go 1.25 构建" >> release-notes.md
-          echo "- 支持多平台架构" >> release-notes.md
-          echo "- 包含版本信息注入" >> release-notes.md
-          echo "" >> release-notes.md
-          echo "### 支持的平台" >> release-notes.md
-          echo "- Linux (x64, x86, arm64)" >> release-notes.md
-          echo "- Windows (x64, x86)" >> release-notes.md
-          echo "- macOS (x64, arm64)" >> release-notes.md
-          echo "- FreeBSD (x64, x86)" >> release-notes.md
-          echo "" >> release-notes.md
-          echo "### 文件校验和" >> release-notes.md
-          echo '```' >> release-notes.md
-          cd dist && sha256sum * >> ../release-notes.md
-          echo '```' >> release-notes.md
+  create-release:
+    name: Create GitHub Release
+    needs: build-matrix
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+    
+    - name: List downloaded files
+      run: |
+        echo "📂 Downloaded artifacts:"
+        find artifacts -type f -name "*.exe" -o -name "*" | sort
+    
+    - name: Create release package
+      run: |
+        # 创建发行版目录
+        mkdir -p release
+        
+        # 复制所有构建文件到release目录
+        find artifacts -type f -exec cp {} release/ \;
+        
+        # 创建校验文件
+        cd release
+        echo "# ${{ env.PROJECT_NAME }} ${{ env.VERSION }}" > CHECKSUM.md
+        echo "## 构建信息" >> CHECKSUM.md
+        echo "- 版本: ${{ env.VERSION }}" >> CHECKSUM.md
+        echo "- 构建时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> CHECKSUM.md
+        echo "- Git提交: $(git rev-parse --short HEAD)" >> CHECKSUM.md
+        echo "" >> CHECKSUM.md
+        echo "## 文件校验和 (SHA256)" >> CHECKSUM.md
+        echo "" >> CHECKSUM.md
+        
+        # 为每个文件生成校验和
+        for file in *; do
+          if [ -f "$file" ]; then
+            sha256sum "$file" >> SHA256SUMS.txt
+            echo "- \`$file\`" >> CHECKSUM.md
+            echo "  \`$(sha256sum "$file" | cut -d' ' -f1)\`" >> CHECKSUM.md
+          fi
+        done
+        
+        # 显示文件列表
+        echo "📦 Release files:"
+        ls -lh
+        
+        echo ""
+        echo "🔍 SHA256 checksums:"
+        cat SHA256SUMS.txt
+    
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        name: "🎉 ${{ env.PROJECT_NAME }} ${{ env.VERSION }}"
+        body: |
+          # 🛡️ ${{ env.PROJECT_NAME }} - 端口扫描与CVE检测工具
+          
+          ## 📋 版本信息
+          - **版本号**: ${{ env.VERSION }}
+          - **构建时间**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          - **Git提交**: $(git rev-parse --short HEAD)
+          
+          ## 📥 下载文件
+          请根据您的操作系统下载对应的可执行文件：
+          
+          ### 🐧 Linux
+          - **64位**: [${{ env.PROJECT_CODE }}-${{ env.VERSION }}-linux-amd64](./${{ env.PROJECT_CODE }}-${{ env.VERSION }}-linux-amd64)
+          - **ARM64**: [${{ env.PROJECT_CODE }}-${{ env.VERSION }}-linux-arm64](./${{ env.PROJECT_CODE }}-${{ env.VERSION }}-linux-arm64)
+          
+          ### 🍎 macOS
+          - **Intel芯片**: [${{ env.PROJECT_CODE }}-${{ env.VERSION }}-darwin-amd64](./${{ env.PROJECT_CODE }}-${{ env.VERSION }}-darwin-amd64)
+          - **Apple芯片**: [${{ env.PROJECT_CODE }}-${{ env.VERSION }}-darwin-arm64](./${{ env.PROJECT_CODE }}-${{ env.VERSION }}-darwin-arm64)
+          
+          ### 🪟 Windows
+          - **64位**: [${{ env.PROJECT_CODE }}-${{ env.VERSION }}-windows-amd64.exe](./${{ env.PROJECT_CODE }}-${{ env.VERSION }}-windows-amd64.exe)
+          
+          ## 🔍 文件校验
+          所有文件的SHA256校验和可在 [SHA256SUMS.txt](./SHA256SUMS.txt) 中查看。
+          
+          ## 🚀 使用说明
+          ```bash
+          # 下载对应版本
+          chmod +x ${{ env.PROJECT_CODE }}-${{ env.VERSION }}-linux-amd64
+          
+          # 基本使用
+          ./${{ env.PROJECT_CODE }}-${{ env.VERSION }}-linux-amd64 -target example.com
+          
+          # 查看帮助
+          ./${{ env.PROJECT_CODE }}-${{ env.VERSION }}-linux-amd64 -help
+          ```
+          
+          ## ✨ 功能特性
+          - ✅ 端口扫描（类似nmap）
+          - ✅ CVE漏洞检测
+          - ✅ 多线程并发扫描
+          - ✅ 支持多种输出格式（JSON/Text/CSV）
+          - ✅ 自动服务识别
+          - ✅ 版本号提取
+          
+          ## 🐛 报告问题
+          如发现问题，请在 [Issues](https://github.com/${{ github.repository }}/issues) 页面报告。
+          
+          ---
+          
+          *祝您使用愉快！*
+          
+        draft: false
+        prerelease: false
+        files: |
+          release/*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 创建 GitHub 发布版
-        uses: softprops/action-gh-release@v1
-        with:
-          name: 乾坤圈 ${{ env.VERSION }}
-          body_path: release-notes.md
-          files: dist/*
-          draft: false
-          prerelease: false
-          generate_release_notes: true
+  publish-homebrew:
+    name: Publish to Homebrew (Optional)
+    needs: create-release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - name: Display info
+      run: |
+        echo "📦 Homebrew发布准备"
+        echo "🔗 Release URL: https://github.com/${{ github.repository }}/releases/tag/${{ env.VERSION }}"
+        
+    # 这里可以添加Homebrew tap发布的逻辑（如果需要）
+    # 通常需要创建formula并推送到homebrew-tap仓库
