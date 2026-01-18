@@ -1,0 +1,47 @@
+name: 构建乾坤圈 
+
+permissions:
+  contents: write
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+      
+      - name: 设置 Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+      
+      - name: 构建
+        run: |
+          mkdir -p dist
+          
+          # Linux (x64, x86)
+          GOOS=linux GOARCH=amd64 go build -o dist/QianKunQuan-linux-amd64 .
+          GOOS=linux GOARCH=386 go build -o dist/QianKunQuan-linux-386 .
+          
+          # Windows (x64, x86)
+          GOOS=windows GOARCH=amd64 go build -o dist/QianKunQuan-windows-amd64.exe .
+          GOOS=windows GOARCH=386 go build -o dist/QianKunQuan-windows-386.exe .
+          
+          # FreeBSD (x64, x86)
+          GOOS=freebsd GOARCH=amd64 go build -o dist/QianKunQuan-freebsd-amd64 .
+          GOOS=freebsd GOARCH=386 go build -o dist/QianKunQuan-freebsd-386 .
+          
+          # macOS (x64, arm64)
+          GOOS=darwin GOARCH=amd64 go build -o dist/QianKunQuan-darwin-amd64 .
+          GOOS=darwin GOARCH=arm64 go build -o dist/QianKunQuan-darwin-arm64 .
+      
+      - name: 创建发布版
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "dist/*"
+          token: ${{ secrets.GITHUB_TOKEN }}
