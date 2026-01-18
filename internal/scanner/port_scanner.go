@@ -25,6 +25,68 @@ type PortScanner struct {
 	verbose bool
 }
 
+// 在文件顶部添加标准端口服务映射
+var standardPorts = map[int]string{
+	// 基础服务
+	21:  "ftp",
+	22:  "ssh",
+	23:  "telnet",
+	25:  "smtp",
+	53:  "domain",
+	80:  "http",
+	110: "pop3",
+	111: "sunrpc",
+	135: "msrpc",
+	139: "netbios-ssn",
+	143: "imap",
+	443: "https",
+	445: "microsoft-ds",
+	465: "smtps",
+	587: "submission",
+	993: "imaps",
+	995: "pop3s",
+
+	// 数据库
+	1433:  "ms-sql-s",
+	1521:  "oracle",
+	3306:  "mysql",
+	3389:  "ms-wbt-server",
+	5432:  "postgresql",
+	5984:  "couchdb",
+	6379:  "redis",
+	8080:  "http-proxy",
+	8443:  "https-alt",
+	9200:  "elasticsearch",
+	9300:  "elasticsearch",
+	11211: "memcached",
+	27017: "mongodb",
+
+	// 其他常用服务
+	3000:  "ppp",
+	3001:  "nessus",
+	5000:  "upnp",
+	5001:  "commplex-link",
+	5433:  "postgresql",
+	5434:  "postgresql",
+	8000:  "http-alt",
+	8001:  "vcom-tunnel",
+	8008:  "http",
+	8081:  "sunproxyadmin",
+	8082:  "blackice-alerts",
+	8083:  "us-srv",
+	8084:  "websnp",
+	8085:  "simplifymedia",
+	8086:  "d-s-n",
+	8087:  "puppet",
+	8088:  "radan-http",
+	8089:  "sunproxyadmin",
+	8888:  "sun-answerbook",
+	8889:  "ddi-tcp-2",
+	9000:  "cslistener",
+	9001:  "etlservicemgr",
+	10000: "snet-sensor-mgmt",
+}
+
 func NewPortScanner(timeoutSec int, threads int, verbose bool) *PortScanner {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &PortScanner{
@@ -135,7 +197,7 @@ func (ps *PortScanner) removeDuplicatesAndSort(ports []int) []int {
 		}
 	}
 
-	// 排序
+	// 简单排序
 	for i := 0; i < len(uniquePorts)-1; i++ {
 		for j := i + 1; j < len(uniquePorts); j++ {
 			if uniquePorts[i] > uniquePorts[j] {
@@ -147,7 +209,7 @@ func (ps *PortScanner) removeDuplicatesAndSort(ports []int) []int {
 	return uniquePorts
 }
 
-// ScanPort 扫描单个端口 - 改进版本
+// ScanPort 扫描单个端口 - 改进服务识别
 func (ps *PortScanner) ScanPort(target string, port int, protocol string) model.PortResult {
 	result := model.PortResult{
 		Port:     port,
@@ -161,42 +223,66 @@ func (ps *PortScanner) ScanPort(target string, port int, protocol string) model.
 		ps.logger.Debug("尝试连接: %s (端口 %d)", address, port)
 	}
 
-	// 尝试连接 - 使用更灵活的Dialer
+	// 先设置默认服务名（根据端口）
+	if serviceName, exists := standardPorts[port]; exists {
+		result.Service.Name = serviceName
+	} else if serviceInfo, exists := model.CommonPorts[port]; exists {
+		result.Service.Name = serviceInfo.Name
+	} else {
+		result.Service.Name = ""
+	}
+
+	// 尝试连接
 	dialer := &net.Dialer{
 		Timeout: ps.timeout,
 	}
 
+	startTime := time.Now()
 	conn, err := dialer.Dial(protocol, address)
+	elapsed := time.Since(startTime)
+
 	if err != nil {
+		errStr := err.Error()
+
 		if ps.verbose {
-			ps.logger.Debug("端口 %d 连接失败: %v", port, err)
+			ps.logger.Debug("端口 %d 连接失败 (耗时: %v): %v", port, elapsed, err)
 		}
 
-		// 根据错误类型判断端口状态
-		if strings.Contains(err.Error(), "timeout") ||
-			strings.Contains(err.Error(), "i/o timeout") {
+		// 判断端口状态
+		switch {
+		case strings.Contains(errStr, "timeout") ||
+			strings.Contains(errStr, "i/o timeout") ||
+			strings.Contains(errStr, "deadline exceeded"):
 			result.State = "filtered"
-		} else if strings.Contains(err.Error(), "refused") ||
-			strings.Contains(err.Error(), "connection refused") {
+
+		case strings.Contains(errStr, "refused") ||
+			strings.Contains(errStr, "connection refused"):
 			result.State = "closed"
-		} else if strings.Contains(err.Error(), "network is unreachable") ||
-			strings.Contains(err.Error(), "no route to host") {
+
+		case strings.Contains(errStr, "network is unreachable") ||
+			strings.Contains(errStr, "no route to host"):
 			result.State = "unreachable"
-		} else if strings.Contains(err.Error(), "too many open files") {
-			// 处理文件描述符过多的问题
-			time.Sleep(50 * time.Millisecond)
+
+		case strings.Contains(errStr, "too many open files"):
+			time.Sleep(100 * time.Millisecond)
+			if ps.verbose {
+				ps.logger.Debug("端口 %d 重试...", port)
+			}
 			return ps.ScanPort(target, port, protocol)
-		} else {
+
+		default:
 			result.State = "closed"
 		}
+
 		return result
 	}
 	defer conn.Close()
 
 	// 端口开放
 	result.State = "open"
+
 	if ps.verbose {
-		ps.logger.Info("端口 %d 开放!", port)
+		ps.logger.Info("端口 %d 开放! (耗时: %v)", port, elapsed)
 	}
 
 	// 尝试获取banner
@@ -206,30 +292,28 @@ func (ps *PortScanner) ScanPort(target string, port int, protocol string) model.
 
 		// 识别服务
 		serviceName := ps.detectService(port, banner)
-		if serviceInfo, exists := model.CommonPorts[port]; exists {
-			result.Service = serviceInfo
-			// 如果banner中有版本信息，更新服务信息
-			if banner != "" && serviceInfo.Version == "" {
-				version := ps.extractVersionFromBanner(banner, serviceInfo.Name)
-				if version != "" {
-					result.Service.Version = version
-					result.Service.Product = serviceInfo.Name
-				}
-			}
-		} else {
-			result.Service = model.ServiceInfo{
-				Name:  serviceName,
-				Extra: "自动识别",
+		if serviceName != "" {
+			result.Service.Name = serviceName
+		}
+
+		// 提取版本信息
+		if banner != "" {
+			version := ps.extractVersionFromBanner(banner, result.Service.Name)
+			if version != "" {
+				result.Service.Version = version
 			}
 		}
 
-		if ps.verbose && banner != "" {
-			// 只显示banner的前100个字符
-			displayBanner := banner
-			if len(displayBanner) > 100 {
-				displayBanner = displayBanner[:100] + "..."
+		if ps.verbose {
+			if banner != "" {
+				displayBanner := banner
+				if len(displayBanner) > 80 {
+					displayBanner = displayBanner[:80] + "..."
+				}
+				ps.logger.Debug("端口 %d banner: %s", port, displayBanner)
+			} else {
+				ps.logger.Debug("端口 %d 没有收到banner", port)
 			}
-			ps.logger.Debug("端口 %d banner: %s", port, displayBanner)
 		}
 	}
 
@@ -238,13 +322,16 @@ func (ps *PortScanner) ScanPort(target string, port int, protocol string) model.
 
 // 从banner中提取版本信息
 func (ps *PortScanner) extractVersionFromBanner(banner, serviceName string) string {
+	if banner == "" {
+		return ""
+	}
+
 	// 查找版本号模式
 	patterns := []string{
 		`\d+\.\d+(\.\d+)*`,          // 1.2.3 或 1.2
 		`v\d+\.\d+`,                 // v1.2
 		`version\s*[:]?\s*\d+\.\d+`, // version 1.2 或 version:1.2
 		`(?i)` + strings.ToLower(serviceName) + `[/\s]+\d+\.\d+`, // nginx/1.18
-		`\d+\.\d+\.\d+\.\d+`, // IP地址格式
 	}
 
 	for _, pattern := range patterns {
@@ -272,22 +359,25 @@ func (ps *PortScanner) grabBanner(conn net.Conn, port int) string {
 	// 设置读取超时
 	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
 
-	buffer := make([]byte, 2048) // 增大缓冲区
+	buffer := make([]byte, 4096) // 增大缓冲区
 	var banner string
 
-	// 根据不同端口发送不同的探测包
 	if ps.verbose {
-		ps.logger.Debug("发送探测包到端口 %d", port)
+		ps.logger.Debug("尝试获取端口 %d 的banner...", port)
 	}
 
+	// 根据不同端口发送不同的探测包
 	switch port {
 	case 22: // SSH
 		conn.Write([]byte("SSH-2.0-Client\r\n"))
+		time.Sleep(100 * time.Millisecond)
 
 	case 25, 465, 587: // SMTP
 		conn.Write([]byte("EHLO example.com\r\n"))
+		time.Sleep(100 * time.Millisecond)
 
-	case 80, 8080, 8081, 8082, 8083, 8084, 8085, 8086, 8087, 8088, 8089, 8888, 8889, 9000, 9001: // HTTP
+	case 80, 8080, 8081, 8082, 8083, 8084, 8085, 8086, 8087, 8088, 8089,
+		8888, 8889, 9000, 9001: // HTTP
 		conn.Write([]byte("GET / HTTP/1.0\r\nHost: localhost\r\nUser-Agent: QianKunQuan-Scanner/1.0\r\nAccept: */*\r\n\r\n"))
 
 	case 443, 8443: // HTTPS
@@ -295,165 +385,197 @@ func (ps *PortScanner) grabBanner(conn net.Conn, port int) string {
 		conn.Write([]byte("GET / HTTP/1.0\r\nHost: localhost\r\n\r\n"))
 
 	case 3306: // MySQL
-		// 发送简单的MySQL握手包
-		conn.Write([]byte{
-			0x0a, 0x00, 0x00, 0x00, // 协议版本长度
-		})
+		// MySQL握手协议 - 更完整的握手包
+		if ps.verbose {
+			ps.logger.Debug("发送MySQL握手包到端口 %d", port)
+		}
+		// MySQL protocol version 10, server version 5.7.32
+		handshake := []byte{
+			0x0a,                                     // Protocol version
+			0x35, 0x2e, 0x37, 0x2e, 0x33, 0x32, 0x00, // Server version
+			0x00, 0x00, 0x00, 0x00, // Thread ID
+			0x00, 0x00, 0x00, 0x00, // Salt (part1)
+			0x00,       // Filter
+			0x00, 0x00, // Server capabilities (low)
+			0x00,       // Server language
+			0x00, 0x00, // Server status
+			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Extended server capabilities
+			0x00,                                           // Authentication plugin length
+			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Reserved
+			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Salt (part2)
+			0x00, // Authentication plugin
+		}
+		conn.Write(handshake)
 		time.Sleep(200 * time.Millisecond)
 
 	case 5432, 5433, 5434: // PostgreSQL
-		// PostgreSQL启动消息
 		conn.Write([]byte{0x00, 0x00, 0x00, 0x08, 0x04, 0xd2, 0x16, 0x2f})
 		time.Sleep(200 * time.Millisecond)
 
 	case 6379: // Redis
-		conn.Write([]byte("PING\r\n"))
-		time.Sleep(200 * time.Millisecond)
-
-	case 21: // FTP
-		time.Sleep(200 * time.Millisecond) // FTP通常会自动发送欢迎信息
-
-	case 23: // Telnet
-		time.Sleep(200 * time.Millisecond)
-
-	case 110, 143: // POP3, IMAP
+		conn.Write([]byte("PING\r\nINFO\r\n"))
 		time.Sleep(200 * time.Millisecond)
 
 	default:
 		// 对于其他端口，等待一小段时间后尝试读取
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(150 * time.Millisecond)
 	}
 
 	// 尝试读取响应
 	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	n, err := conn.Read(buffer)
 
-	if err != nil {
-		if ps.verbose && !strings.Contains(err.Error(), "timeout") {
-			ps.logger.Debug("端口 %d 读取失败: %v", port, err)
+	// 非阻塞读取，多次尝试
+	for i := 0; i < 3; i++ {
+		n, err := conn.Read(buffer)
+		if err != nil {
+			// 如果是超时或EOF，继续尝试
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				if i < 2 && ps.verbose {
+					ps.logger.Debug("端口 %d 读取超时，重试 %d/2", port, i+1)
+				}
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+			break
 		}
-		return ""
+
+		if n > 0 {
+			banner = string(buffer[:n])
+			banner = strings.TrimSpace(banner)
+
+			if ps.verbose {
+				ps.logger.Debug("端口 %d 收到 %d 字节响应", port, n)
+			}
+			break
+		}
 	}
 
-	if n > 0 {
-		banner = string(buffer[:n])
-		banner = strings.TrimSpace(banner)
-
-		// 限制banner长度
-		if len(banner) > 500 {
-			banner = banner[:500] + "..."
-		}
-
-		if ps.verbose {
-			ps.logger.Debug("端口 %d 收到 %d 字节响应", port, n)
-		}
+	// 限制banner长度
+	if len(banner) > 500 {
+		banner = banner[:500] + "..."
 	}
 
 	return banner
 }
 
-// detectService 根据端口和banner识别服务 - 改进版本
+// detectService 根据端口和banner识别服务
 func (ps *PortScanner) detectService(port int, banner string) string {
 	// 首先检查CommonPorts中的已知服务
 	if serviceInfo, exists := model.CommonPorts[port]; exists {
-		return serviceInfo.Name
+		return strings.ToLower(serviceInfo.Name)
 	}
 
-	// 如果banner为空，返回unknown
+	// 如果banner为空，根据端口号返回常见服务名
 	if banner == "" {
-		return fmt.Sprintf("unknown-%d", port)
+		switch port {
+		case 3306:
+			return "mysql"
+		case 5432:
+			return "postgresql"
+		case 80:
+			return "http"
+		case 443:
+			return "https"
+		case 22:
+			return "ssh"
+		case 21:
+			return "ftp"
+		case 25:
+			return "smtp"
+		case 23:
+			return "telnet"
+		case 53:
+			return "dns"
+		case 110:
+			return "pop3"
+		case 143:
+			return "imap"
+		case 465:
+			return "smtps"
+		case 587:
+			return "smtp"
+		case 993:
+			return "imaps"
+		case 995:
+			return "pop3s"
+		case 1433:
+			return "ms-sql-s"
+		case 1521:
+			return "oracle"
+		case 3389:
+			return "ms-wbt-server"
+		case 5900:
+			return "vnc"
+		case 6379:
+			return "redis"
+		case 8080:
+			return "http-proxy"
+		case 8443:
+			return "https-alt"
+		default:
+			return fmt.Sprintf("unknown-%d", port)
+		}
 	}
 
 	// 根据banner内容识别服务
 	bannerLower := strings.ToLower(banner)
 
-	// 扩展服务识别模式
-	servicePatterns := map[string][]string{
-		"HTTP":          {"http/", "server:", "apache", "nginx", "iis", "tomcat", "jetty", "lighttpd"},
-		"SSH":           {"ssh-", "openssh", "dropbear"},
-		"FTP":           {"220", "ftp", "filezilla", "vsftpd", "proftpd"},
-		"SMTP":          {"220", "smtp", "esmtp", "postfix", "exim", "sendmail", "qmail"},
-		"DNS":           {"domain", "bind", "dns"},
-		"RDP":           {"rdp", "remote desktop", "microsoft terminal services"},
-		"MySQL":         {"mysql", "mariadb"},
-		"PostgreSQL":    {"postgresql", "postgres"},
-		"Redis":         {"redis", "redis server"},
-		"MongoDB":       {"mongodb"},
-		"Elasticsearch": {"elasticsearch", "elastic"},
-		"Memcached":     {"memcached"},
-		"CouchDB":       {"couchdb"},
-		"Oracle":        {"oracle", "oracle database"},
-		"MSSQL":         {"sql server", "microsoft sql", "ms sql"},
-		"SMB":           {"samba", "smb", "microsoft-ds"},
-		"Telnet":        {"telnet", "linux"},
-		"VNC":           {"vnc", "tightvnc", "tigervnc", "realvnc"},
-		"Proxy":         {"proxy", "squid", "haproxy"},
-		"VPN":           {"openvpn", "pptp", "l2tp"},
-		"LDAP":          {"ldap", "openldap"},
-	}
+	// 映射到nmap常见的服务名
+	switch {
+	case strings.Contains(bannerLower, "apache") ||
+		strings.Contains(bannerLower, "http/") ||
+		strings.Contains(bannerLower, "server: apache"):
+		return "http"
 
-	for service, patterns := range servicePatterns {
-		for _, pattern := range patterns {
-			if strings.Contains(bannerLower, pattern) {
-				return service
-			}
+	case strings.Contains(bannerLower, "nginx"):
+		return "http"
+
+	case strings.Contains(bannerLower, "iis") ||
+		strings.Contains(bannerLower, "microsoft-httpapi"):
+		return "http"
+
+	case strings.Contains(bannerLower, "ssh"):
+		return "ssh"
+
+	case strings.Contains(bannerLower, "ftp"):
+		return "ftp"
+
+	case strings.Contains(bannerLower, "smtp"):
+		return "smtp"
+
+	case strings.Contains(bannerLower, "mysql"):
+		return "mysql"
+
+	case strings.Contains(bannerLower, "postgresql") ||
+		strings.Contains(bannerLower, "postgres"):
+		return "postgresql"
+
+	case strings.Contains(bannerLower, "redis"):
+		return "redis"
+
+	case strings.Contains(bannerLower, "mongodb"):
+		return "mongodb"
+
+	case strings.Contains(bannerLower, "microsoft") ||
+		strings.Contains(bannerLower, "mssql"):
+		return "ms-sql-s"
+
+	case strings.Contains(bannerLower, "oracle"):
+		return "oracle"
+
+	default:
+		// 尝试根据端口返回
+		switch port {
+		case 80, 8080, 8000, 8008, 8081, 8082, 8083, 8084, 8085, 8086, 8087, 8088, 8089, 8888, 8889, 9000, 9001:
+			return "http"
+		case 443, 8443:
+			return "https"
+		default:
+			return fmt.Sprintf("unknown-%d", port)
 		}
 	}
-
-	// 尝试通过端口号推测常见服务
-	switch port {
-	case 53:
-		return "DNS"
-	case 67, 68:
-		return "DHCP"
-	case 69:
-		return "TFTP"
-	case 123:
-		return "NTP"
-	case 161, 162:
-		return "SNMP"
-	case 389:
-		return "LDAP"
-	case 636:
-		return "LDAPS"
-	case 993:
-		return "IMAPS"
-	case 995:
-		return "POP3S"
-	case 1433:
-		return "MSSQL"
-	case 1521:
-		return "Oracle"
-	case 1723:
-		return "PPTP"
-	case 1812, 1813:
-		return "RADIUS"
-	case 2049:
-		return "NFS"
-	case 3389:
-		return "RDP"
-	case 5060, 5061:
-		return "SIP"
-	case 5900, 5901:
-		return "VNC"
-	case 8000, 8001, 8002, 8003, 8004, 8005, 8006, 8007, 8008, 8009:
-		return "HTTP"
-	case 8443:
-		return "HTTPS"
-	case 9090:
-		return "HTTP"
-	case 9200, 9300:
-		return "Elasticsearch"
-	case 11211:
-		return "Memcached"
-	case 27017:
-		return "MongoDB"
-	}
-
-	return fmt.Sprintf("unknown-%d", port)
 }
 
-// ConcurrentScan 并发扫描
 func (ps *PortScanner) ConcurrentScan(target string, ports []int) <-chan model.PortResult {
 	// 重置context
 	ps.ctx, ps.cancel = context.WithCancel(context.Background())
@@ -493,9 +615,8 @@ func (ps *PortScanner) worker(ctx context.Context, target string, ports <-chan i
 			return
 		default:
 			result := ps.ScanPort(target, port, "tcp")
-			if result.State == "open" {
-				ps.results <- result
-			}
+			// 发送所有结果，包括closed和filtered
+			ps.results <- result
 		}
 	}
 }
