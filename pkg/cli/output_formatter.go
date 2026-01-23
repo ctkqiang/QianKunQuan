@@ -118,20 +118,149 @@ func (of *OutputFormatter) formatEnhancedNmapStyle(result model.ScanResult) stri
 		if serviceName == "" {
 			// 尝试根据端口号猜测
 			switch port.Port {
+			// 常见网络服务
 			case 21:
 				serviceName = "ftp"
 			case 22:
 				serviceName = "ssh"
+			case 23:
+				serviceName = "telnet"
+			case 25:
+				serviceName = "smtp"
+			case 53:
+				serviceName = "dns"
+			case 67, 68:
+				serviceName = "dhcp"
+			case 69:
+				serviceName = "tftp"
 			case 80:
 				serviceName = "http"
+			case 110:
+				serviceName = "pop3"
+			case 123:
+				serviceName = "ntp"
+			case 143:
+				serviceName = "imap"
+			case 161, 162:
+				serviceName = "snmp"
+			case 179:
+				serviceName = "bgp"
+			case 389:
+				serviceName = "ldap"
 			case 443:
 				serviceName = "https"
+			case 445:
+				serviceName = "smb"
+			case 465:
+				serviceName = "smtps"
+			case 514:
+				serviceName = "syslog"
+			case 587:
+				serviceName = "smtp-submission"
+			case 636:
+				serviceName = "ldaps"
+			case 993:
+				serviceName = "imaps"
+			case 995:
+				serviceName = "pop3s"
+
+			// 数据库服务
+			case 1433:
+				serviceName = "mssql"
+			case 1521:
+				serviceName = "oracle"
+			case 27017:
+				serviceName = "mongodb"
 			case 3306:
 				serviceName = "mysql"
 			case 5432:
 				serviceName = "postgresql"
+			case 6379:
+				serviceName = "redis"
+			case 9200:
+				serviceName = "elasticsearch"
+
+			// 消息队列和缓存
+			case 5672:
+				serviceName = "rabbitmq"
+
+			// Web应用和服务
+			case 8080:
+				serviceName = "http-proxy"
+			case 8443:
+				serviceName = "https-alt"
+			case 9000:
+
+			case 9300:
+				serviceName = "elasticsearch-cluster"
+			case 11211:
+				serviceName = "memcached"
+			case 15672:
+				serviceName = "rabbitmq-admin"
+
+			// RPC和远程服务
+			case 1099:
+				serviceName = "rmi"
+			case 2049:
+				serviceName = "nfs"
+			case 2181:
+				serviceName = "zookeeper"
+			case 2379, 2380:
+				serviceName = "etcd"
+			case 2888, 3888:
+				serviceName = "zookeeper-cluster"
+
+			// 容器和编排
+			case 2375:
+				serviceName = "docker"
+			case 2376:
+				serviceName = "docker-tls"
+			case 6443:
+				serviceName = "kubernetes-api"
+			case 10250:
+				serviceName = "kubelet"
+			case 10255:
+				serviceName = "kubelet-readonly"
+
+			// 监控和日志
+			case 9090:
+				serviceName = "prometheus"
+			case 3000:
+				serviceName = "grafana"
+			case 9093:
+				serviceName = "alertmanager"
+			case 24224:
+				serviceName = "fluentd"
+
+			// 虚拟化和云服务
+			case 3389:
+				serviceName = "rdp"
+			case 5900:
+				serviceName = "vnc"
+			case 5985, 5986:
+				serviceName = "winrm"
+
+			// 开发工具
+			case 5000:
+				serviceName = "flask-dev"
+			case 8000:
+				serviceName = "django-dev"
+			case 8081:
+				serviceName = "artifactory"
+			case 9001:
+				serviceName = "portainer"
+
 			default:
-				serviceName = "unknown"
+				// 可以进一步按端口范围分类
+				if port.Port >= 1 && port.Port <= 1023 {
+					serviceName = "well-known"
+				} else if port.Port >= 1024 && port.Port <= 49151 {
+					serviceName = "registered"
+				} else if port.Port >= 49152 && port.Port <= 65535 {
+					serviceName = "dynamic"
+				} else {
+					serviceName = "unknown"
+				}
 			}
 		}
 

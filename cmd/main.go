@@ -76,7 +76,7 @@ func main() {
 	// 更新CVE数据库
 	if options.UpdateDB {
 		logger.Info("正在更新CVE数据库...")
-		if err := updateCVEDatabase(); err != nil {
+		if err := updateCVEDatabase(cveDB); err != nil {
 			logger.Error("更新CVE数据库失败: %v", err)
 		} else {
 			logger.Info("CVE数据库更新完成")
@@ -86,7 +86,6 @@ func main() {
 	// 如果没有数据，初始化测试数据
 	if options.UpdateDB {
 		logger.Info("初始化测试CVE数据...")
-
 	}
 
 	// 创建端口扫描器
@@ -224,9 +223,46 @@ func extractHostname(target string) string {
 	return target
 }
 
-func updateCVEDatabase() error {
-	// 这里实现从官方源下载CVE数据的逻辑
-	// 可以使用NVD的JSON feed: https://nvd.nist.gov/vuln/data-feeds
+func updateCVEDatabase(db *cvedb.CVEDatabase) error {
+	logger := utils.NewLogger("cve-updater")
+
+	// 方法1: 使用新的API客户端获取2025-2026年数据
+	logger.Info("使用NVD API获取2025-2026年CVE数据...")
+	apiClient := cvedb.NewCVEAPIClient()
+
+	// 获取2025-2026年CVE数据
+	cves, err := apiClient.FetchCVEsByYearRange(2025, 2026)
+	if err != nil {
+		logger.Error("API获取CVE数据失败: %v", err)
+		logger.Info("尝试使用批量更新器作为备选方案...")
+
+		// 方法2: 回退到批量更新器
+		bulkUpdater := cvedb.NewBulkCVEUpdater()
+		if err := bulkUpdater.UpdateFrom2025ToCurrent(db); err != nil {
+			logger.Error("批量更新器也失败: %v", err)
+			return fmt.Errorf("所有CVE数据更新方法都失败")
+		}
+
+		logger.Info("批量更新器成功更新CVE数据")
+		return nil
+	}
+
+	// 将CVE数据保存到数据库
+	logger.Info("成功获取 %d 个CVE，正在保存到数据库...", len(cves))
+	successCount, err := apiClient.SaveCVEsToDatabase(db, cves)
+	if err != nil {
+		logger.Warn("部分CVE保存失败: %v", err)
+	}
+
+	logger.Info("CVE数据更新完成: %d 个CVE成功保存", successCount)
+
+	// 同时使用批量更新器获取更早的数据（如果需要）
+	logger.Info("补充获取历史CVE数据...")
+	bulkUpdater := cvedb.NewBulkCVEUpdater()
+	if err := bulkUpdater.UpdateFrom2025ToCurrent(db); err != nil {
+		logger.Warn("补充历史数据失败: %v", err)
+	}
+
 	return nil
 }
 
