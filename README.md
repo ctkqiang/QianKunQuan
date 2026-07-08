@@ -457,3 +457,24 @@ A: 使用 `-p 22,80,443,8080` 或 `-p 1-1000`。
 **🔴 红队利器，为国护网 🔴**
 
 </div>
+---
+
+## 支持
+
+如果您觉得本项目对您有帮助，欢迎请我喝杯咖啡，您的支持是我持续维护和改进的动力！
+
+<p align="center">
+  <strong>微信扫码捐赠</strong><br/>
+  <img src="https://raw.gitcode.com/ctkqiang_sr/ctkqiang_sr/raw/main/mm_reward_qrcode_1778988737577.png"
+       alt="微信扫码捐赠"
+       width="240"
+       style="border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);" />
+</p>
+
+---
+
+<div align="center">
+
+基于 Go 构建 · 由 MCP 驱动 · 安全设计 · ctkqiang
+
+</div>
